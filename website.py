@@ -7,6 +7,9 @@ solver = Knowledgebase()
 guess = "arose"
 
 def reset():
+	global guess
+	global solver
+	
 	solver = Knowledgebase()
 	guess = "arose"
 
@@ -18,6 +21,12 @@ def index():
 	crash = "Nope"
 	if request.method == 'POST':
 		result = request.form.get("result", default="", type=str)
+		reset_value = request.form.get("reset", default="", type=str)
+
+		if reset_value != "":
+			reset()
+			return render_template("index.html", guess=guess, crash=crash)
+
 		if result == "":
 			crash = "Enter something idiot"
 			return render_template("index.html", guess=guess, crash=crash)
