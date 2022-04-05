@@ -318,86 +318,87 @@ def decode_input(value):
 		last_letter = letter
 	return result
 
-if len(sys.argv) < 2:
-	solver = Knowledgebase()
-	while True:
-		value = input("Guess result: ")
-		if value == "won":
-			print("Congrats on your hard work")
-			exit(0)
-
-		solver.add_knowledge(decode_input(value))
-		guess = solver.guess()
-		print("Best guess: " + guess)
-else:
-	aggregate = 0
-	average_entropy = 0
-	total = 0
-
-	histogram = {
-		1: 0,
-		2: 0,
-		3: 0,
-		4: 0,
-		5: 0,
-		6: 0,
-	}
-
-	uncertainties_list = []
-
-	start = 0
-	end = len(wordle)
-	peek = False
-	if len(sys.argv) == 3:
-		start = int(sys.argv[2])
-		end = start + 1
-		peek = True
-	elif len(sys.argv) == 4:
-		start = int(sys.argv[2])
-		end = int(sys.argv[3])
-
-	for index in range(start, end):
+if __name__ == "__main__":
+	if len(sys.argv) < 2:
 		solver = Knowledgebase()
-		player = Player(wordle[index])
-		guesses = ["arose"]
+		while True:
+			value = input("Guess result: ")
+			if value == "won":
+				print("Congrats on your hard work")
+				exit(0)
 
-		print(wordle[index])
+			solver.add_knowledge(decode_input(value))
+			guess = solver.guess()
+			print("Best guess: " + guess)
+	else:
+		aggregate = 0
+		average_entropy = 0
+		total = 0
 
-		score = -1
-		for i in range(0, 6):
-			result = player.guess(guesses[-1])
-			if peek == True:
-				print("Guessing: " + guesses[-1])
-				print(result)
+		histogram = {
+			1: 0,
+			2: 0,
+			3: 0,
+			4: 0,
+			5: 0,
+			6: 0,
+		}
 
-			if result != "correct":
-				solver.add_knowledge(decode_input(result))
-				guesses.append(solver.guess())
+		uncertainties_list = []
+
+		start = 0
+		end = len(wordle)
+		peek = False
+		if len(sys.argv) == 3:
+			start = int(sys.argv[2])
+			end = start + 1
+			peek = True
+		elif len(sys.argv) == 4:
+			start = int(sys.argv[2])
+			end = int(sys.argv[3])
+
+		for index in range(start, end):
+			solver = Knowledgebase()
+			player = Player(wordle[index])
+			guesses = ["arose"]
+
+			print(wordle[index])
+
+			score = -1
+			for i in range(0, 6):
+				result = player.guess(guesses[-1])
+				if peek == True:
+					print("Guessing: " + guesses[-1])
+					print(result)
+
+				if result != "correct":
+					solver.add_knowledge(decode_input(result))
+					guesses.append(solver.guess())
+				else:
+					score = i + 1
+					for j in range(0, len(solver.uncertainties)):
+						uncertainty = solver.uncertainties[j]
+						uncertainties_list.append((uncertainty, score - j - 1))
+					break
+			
+			if score < 0:
+				print("dnf on " + wordle[index] + " " + str(index))
 			else:
-				score = i + 1
-				for j in range(0, len(solver.uncertainties)):
-					uncertainty = solver.uncertainties[j]
-					uncertainties_list.append((uncertainty, score - j - 1))
-				break
+				aggregate += score
+				histogram[score] += 1
+				total += 1
 		
-		if score < 0:
-			print("dnf on " + wordle[index] + " " + str(index))
-		else:
-			aggregate += score
-			histogram[score] += 1
-			total += 1
-	
-	# means, x_axis, _ = stats.binned_statistic([i[0] for i in uncertainties_list], [i[1] for i in uncertainties_list], bins=20)
-	# data = []
-	# for i in range(0, len(means)):
-	# 	data.append(((x_axis[i] + x_axis[i + 1]) / 2, means[i]))
-	# model = LinearRegression().fit([[i[0]] for i in data], [[i[1]] for i in data])
-	# print(f"{model.intercept_} {model.coef_}")
+		# means, x_axis, _ = stats.binned_statistic([i[0] for i in uncertainties_list], [i[1] for i in uncertainties_list], bins=20)
+		# data = []
+		# for i in range(0, len(means)):
+		# 	data.append(((x_axis[i] + x_axis[i + 1]) / 2, means[i]))
+		# model = LinearRegression().fit([[i[0]] for i in data], [[i[1]] for i in data])
+		# print(f"{model.intercept_} {model.coef_}")
 
-	# plt.bar(x_axis[:-1], means, width=0.1)
-	# plt.show()
+		# plt.bar(x_axis[:-1], means, width=0.1)
+		# plt.show()
 
-	if peek == False:
-		print(f"average first entropy: {average_entropy}")
-		print(f"average: {aggregate / total}")
-		print(histogram)
+		if peek == False:
+			print(f"average first entropy: {average_entropy}")
+			print(f"average: {aggregate / total}")
+			print(histogram)

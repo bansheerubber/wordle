@@ -1,10 +1,36 @@
 from flask import Flask, render_template, request
+from solver import Knowledgebase, decode_input
 
 app = Flask(__name__)
 
-@app.route("/")
+solver = Knowledgebase()
+guess = "arose"
+
+def reset():
+	solver = Knowledgebase()
+	guess = "arose"
+
+@app.route("/", methods = ["GET", "POST"])
 def index():
-	return render_template("index.html", guess="arose")
+	global guess
+	global solver
+	
+	crash = "Nope"
+	if request.method == 'POST':
+		result = request.form.get("result", default="", type=str)
+		if result == "":
+			crash = "Enter something idiot"
+			return render_template("index.html", guess=guess, crash=crash)
+		
+		try:
+			solver.add_knowledge(decode_input(result))
+			guess = solver.guess()
+		except Exception as e:
+			print(e)
+			reset()
+			crash = "Yep"
+	
+	return render_template("index.html", guess=guess, crash=crash)
 
 if __name__ == "__main__":
-	app.run(host="0.0.0.0", debug=True)
+	app.run(host="0.0.0.0", port="8001")
