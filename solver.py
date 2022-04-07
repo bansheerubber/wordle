@@ -1,6 +1,5 @@
 from enum import Enum
 import sys
-from subprocess import Popen, PIPE
 import copy
 import math
 import os
@@ -8,6 +7,13 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 import pickle
+import time
+
+def get_argument(arg):
+	for i in range(0, len(sys.argv)):
+		if arg == sys.argv[i]:
+			return sys.argv[i + 1]
+	return None
 
 file = open("wordle-truth.txt")
 wordle = [word.strip() for word in file.readlines()]
@@ -16,15 +22,26 @@ class Player:
 	def __init__(self, word):
 		self.word = word
 
+		self.letter_counts = {}
+		for letter in word:
+			if letter not in self.letter_counts:
+				self.letter_counts[letter] = 1
+			else:
+				self.letter_counts[letter] += 1
+
 	def guess(self, guess):
+		letter_counts = self.letter_counts.copy()
+		
 		result = ""
 		correct = 0
 		for i in range(0, 5):
 			if self.word[i] == guess[i]:
 				result += guess[i].upper()
 				correct += 1
-			elif guess[i] in self.word:
+				letter_counts[guess[i]] -= 1
+			elif guess[i] in self.word and letter_counts[guess[i]] > 0:
 				result += guess[i]
+				letter_counts[guess[i]] -= 1
 			else:
 				result += "-" + guess[i]
 		
@@ -36,7 +53,6 @@ class Player:
 words = open("list.txt").readlines()
 words = list(set([word.strip() for word in words] + wordle))
 words_length = len(words)
-# print(words_length)
 
 word_frequency_file = open("five-letter-frequency.txt")
 word_frequency_total = 0
@@ -45,13 +61,19 @@ for line in word_frequency_file:
 	word_frequency_total += int(frequency)
 word_frequency_file.close()
 
+sigmoid_center = 4500 if get_argument("--sigmoid-center") == None else float(get_argument("--sigmoid-center"))
+sigmoid_slope = 0.001 if get_argument("--sigmoid-slope") == None else float(get_argument("--sigmoid-slope"))
+
 word_frequency_file = open("five-letter-frequency.txt")
 word_frequency = {}
 word_frequency_sigmoid_total = 0
 for line in word_frequency_file:
 	word, frequency = line.strip().split(" ")
 	word_frequency[word] = int(frequency)
-	word_frequency[word] = 1 / (1 + math.e ** (-0.004 * (-len(word_frequency) + 1000)))
+	if len(word_frequency) > 30000:
+		word_frequency[word] = 2.220446049250313e-16
+	else:
+		word_frequency[word] = 1 / (1 + math.e ** (-sigmoid_slope * (-len(word_frequency) + sigmoid_center)))
 	word_frequency_sigmoid_total += word_frequency[word]
 word_frequency_file.close()
 
@@ -148,13 +170,15 @@ starting_entropy = 0
 for word in words:
 	probability = get_word_frequency(word) / total
 	if probability != 0:
-		starting_entropy += probability * math.log2(1 / probability)
+		starting_entropy -= probability * math.log2(probability)
 
 class Knowledgebase:
 	def __init__(self):
 		self.excluded_letters = set()
 		self.letters_at_position = set()
 		self.letters_in_word = {}
+		self.letter_upper_limit = {}
+		self.letter_lower_limit = {}
 		self.entropy = 0
 		self.guess_count = 1
 
@@ -167,16 +191,31 @@ class Knowledgebase:
 		if knowledge == None:
 			knowledge = (self.excluded_letters, self.letters_at_position, self.letters_in_word)
 		
+		letter_count = {}
 		for position in range(0, 5):
 			letter, letter_type = letter_list[position]
+
+			if letter not in letter_count:
+				letter_count[letter] = 0
+
 			if letter_type == CommandType.LETTER_AT_POSITION:
 				knowledge[1].add((letter, position))
+				letter_count[letter] += 1
 			elif letter_type == CommandType.LETTER_IN_WORD:
 				if letter not in knowledge[2]:
 					knowledge[2][letter] = set()
 				knowledge[2][letter].add(position)
+				letter_count[letter] += 1
 			elif letter_type == CommandType.EXCLUDE_LETTER:
 				knowledge[0].add(letter)
+
+			# handle letter upper limit
+			if letter not in self.letter_upper_limit or self.letter_upper_limit[letter] < letter_count[letter]:
+				self.letter_upper_limit[letter] = letter_count[letter]
+		
+		for letter, count in letter_count.items():
+			if (letter not in self.letter_lower_limit or count > self.letter_lower_limit[letter]) and count > 0:
+				self.letter_lower_limit[letter] = count
 	
 	def simulate_add_knowledge(self, guess, truth):
 		player = Player(truth)
@@ -210,10 +249,19 @@ class Knowledgebase:
 		command_list = self.generate_command_list(knowledge)
 
 		# generate initial set
+		letter_count = {}
 		command = command_list[0]
 		if command.type == CommandType.LETTER_AT_POSITION:
+			if command.parameters[0] not in letter_count: # keep track of the letters we're expecting
+				letter_count[command.parameters[0]] = 0
+			letter_count[command.parameters[0]] += 1
+
 			result_set = set(word_sets[command.parameters[0]][command.parameters[1]])
 		elif command.type == CommandType.LETTER_IN_WORD:
+			if command.parameters[0] not in letter_count: # keep track of the letters we're expecting
+				letter_count[command.parameters[0]] = 0
+			letter_count[command.parameters[0]] += 1
+			
 			for i in range(0, 5):
 				if i not in command.parameters[1]:
 					if len(result_set) == 0:
@@ -232,9 +280,17 @@ class Knowledgebase:
 		for i in range(1, len(command_list)):
 			command = command_list[i]
 			if command.type == CommandType.LETTER_AT_POSITION:
+				if command.parameters[0] not in letter_count: # keep track of the letters we're expecting
+					letter_count[command.parameters[0]] = 0
+				letter_count[command.parameters[0]] += 1
+				
 				result_set = result_set.intersection(word_sets[command.parameters[0]][command.parameters[1]])
 			elif command.type == CommandType.LETTER_IN_WORD:
-				for i in range(0, 5):
+				if command.parameters[0] not in letter_count: # keep track of the letters we're expecting
+					letter_count[command.parameters[0]] = 0
+				letter_count[command.parameters[0]] += 1
+				
+				for i in range(0, 5): # subset
 					if i in command.parameters[1]:
 						result_set = result_set.difference(word_sets[command.parameters[0]][i])
 				temp_set = set(result_set)
@@ -245,9 +301,28 @@ class Knowledgebase:
 			elif command.type == CommandType.EXCLUDE_LETTER:
 				temp_set = set()
 				for word in result_set:
-					if command.parameters[0] not in word:
+					count = 0
+					for letter in word:
+						if command.parameters[0] == letter:
+							count += 1
+
+					if count <= self.letter_upper_limit[command.parameters[0]]:
 						temp_set.add(word)
+
 				result_set = temp_set
+		
+		temp_set = set(result_set)
+		for letter, count in self.letter_lower_limit.items():
+			if count > 1:
+				for word in temp_set:
+					count2 = 0
+					for letter2 in word:
+						if letter == letter2:
+							count2 += 1
+					
+					if count2 < count:
+						result_set.remove(word)
+				temp_set = set(result_set)
 
 		def heuristic(word):
 			entropy, frequency = self.compute_expected_entropy(word, result_set)
@@ -270,7 +345,7 @@ class Knowledgebase:
 		for word in result_set:
 			probability = get_word_frequency(word) / total
 			if probability != 0:
-				self.last_entropy += probability * math.log2(1 / probability)
+				self.last_entropy -= probability * math.log2(probability)
 		self.uncertainties.append(self.last_entropy)
 		
 		# sort by heuristic
@@ -281,20 +356,19 @@ class Knowledgebase:
 		unique = 0
 		total_word_frequency = 0
 		for word in word_list:
-			key = compute_key(guess, word, True)
-			
+			key = cached_keys[guess][word]
 			if key not in distribution:
 				distribution[key] = 0
-
-			distribution[key] += get_word_frequency(word)
-			unique += get_word_frequency(word)
+			freq = get_word_frequency(word)
+			distribution[key] += freq
+			unique += freq
 		
 		entropy = 0
 		for value in distribution.values():
 			if unique != 0:
 				probability = value / unique
 				if probability != 0:
-					entropy += probability * math.log2(1 / probability)
+					entropy -= probability * math.log2(probability)
 	
 		return (entropy, get_word_frequency(guess) / unique if guess in word_list else 0)
 
@@ -349,13 +423,13 @@ if __name__ == "__main__":
 		start = 0
 		end = len(wordle)
 		peek = False
-		if len(sys.argv) == 3:
+		if len(sys.argv) >= 4:
+			start = int(sys.argv[2])
+			end = int(sys.argv[3])
+		elif len(sys.argv) >= 3:
 			start = int(sys.argv[2])
 			end = start + 1
 			peek = True
-		elif len(sys.argv) == 4:
-			start = int(sys.argv[2])
-			end = int(sys.argv[3])
 
 		for index in range(start, end):
 			solver = Knowledgebase()
@@ -401,4 +475,4 @@ if __name__ == "__main__":
 		if peek == False:
 			print(f"average first entropy: {average_entropy}")
 			print(f"average: {aggregate / total}")
-			print(histogram)
+			print(f"histogram: {histogram}")
